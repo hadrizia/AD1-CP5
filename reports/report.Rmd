@@ -1,0 +1,119 @@
+---
+title: 'Regressão e romance'
+author: "Hadrizia Santos"
+date: "31 de julho de 2018"
+output: 
+  html_notebook:
+    theme: readable
+    fig_width: 8
+    toc: true
+    toc_float: true
+editor_options: 
+  chunk_output_type: inline
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(here)
+library(readr)
+library(tidyverse)
+library(lubridate)
+library(stringr)
+
+theme_set(theme_bw())
+```
+
+## Os dados
+os dados descrem 5000 encontros relâmpagos de 4 minutos envolvendo 310 jovens americanos. Os dados originais foram coletados por professores da Columbia Business School [no experimento descrito aqui](http://faculty.chicagobooth.edu/emir.kamenica/documents/genderDifferences.pdf). Os participantes tinham vários encontros de 4 minutos por noite. Após cada um, preenchiam fichas avaliando aqueles com quem se encontraram. Cada linha nos dados representa um desses encontros.
+
+## As perguntas
+O que causa atração à primeira vista? E como isso varia para diferentes sexos? Pessoas de diferentes backgrounds? O que são as características mais e menos importantes para um homem/mulher ser percebido bem em um speed date? Que grupos são mais otimistas e pessimistas após o encontro?
+
+
+```{r warning=FALSE, message=FALSE}
+datings <- read.csv(here::here("/data/speed-dating2.csv")) %>%
+glimpse()
+```
+
+Os dados estão distribuídos nas seguintes colunas:
+
+* `userId`: Identificador do usuário;
+* `movieId`: Identificador do filme;
+* `rating`: A avaliação dada por um usuário a um filme.
+* `title`: O título do filme;
+* `genres`: Os gêneros do filme;
+* `date`: As datas;
+* `is_weekend`: Se a data é um fim de semana (Sábado ou Domingo).
+
+<br>
+
+#### Proporção da amostra
+
+```{r warning=FALSE, message=FALSE}
+data <- merge(data, data %>% select(genres, is_weekend, rating, date) %>% group_by(date) %>% summarise(cont_ratings = n()),  by='date')
+
+data %>%
+    ggplot() + 
+    aes(x = reorder(genres, cont_ratings, NROW),
+        fill = is_weekend) + 
+    geom_bar() + 
+    labs(
+        x = "Gêneros", 
+        y = "Quantidade de avaliações", 
+        fill = "É final de semana?"
+    )
+
+```
+
+## Pergunta
+
+A pergunta é: dada essa amostra, podemos inferir que há uma diferença na taxa de avaliações dadas também *na população de onde saiu essa amostra?*
+
+### Usando Testes de hipótese e p-valores
+
+```{r warning=FALSE, message=FALSE, include=TRUE}
+# A diferença na amostra, que queremos comparar com o modelo nulo
+d = data %>% 
+    group_by(is_weekend) %>% 
+    summarise(ct = sum(cont_ratings) / n())
+m1 = d %>% filter(!is_weekend) %>% pull(ct)
+m2 = d %>% filter(is_weekend) %>% pull(ct)
+
+diferenca_amostral = m1 - m2
+
+# Permutações para calcular o que acontece no modelo nulo
+permutacoes = replicate(10000, 
+          {
+              d = data %>% 
+                  mutate(version_shuffled = sample(is_weekend, n())) %>% 
+                  group_by(version_shuffled) %>% 
+                  summarise(ct = sum(cont_ratings) / n())
+              m1 = d %>% filter(!version_shuffled) %>% pull(ct)
+              m2 = d %>% filter(version_shuffled) %>% pull(ct)
+              m1 - m2
+          })
+```
+
+#### Exibindo resultados
+
+```{r}
+tibble(diferenca = permutacoes) %>% 
+  ggplot(aes(x = diferenca)) + 
+  geom_histogram(bins = 30) + 
+  geom_vline(xintercept = diferenca_amostral, size = 2, color = "orange")
+```
+
+#### P-valor
+
+P-valor é a probabilidade de se obter uma estatística de teste igual ou mais extrema que aquela observada em uma amostra, sob a hipótese nula. Por exemplo, em testes de hipótese, pode-se rejeitar a hipótese nula a 5% caso o valor-p seja menor que 5%. Assim, uma outra interpretação para o valor-p, é que este é menor nível de significância com que se rejeitaria a hipótese nula. Em termos gerais, um valor-p pequeno significa que a probabilidade de obter um valor da estatística de teste como o observado é muito improvável, levando assim à rejeição da hipótese nula. [(Fonte)](https://pt.wikipedia.org/wiki/Valor-p)
+
+```{r warning=FALSE, message=FALSE}
+prop = function(x){
+    sum(x)/NROW(x)
+}
+data %>% 
+    resample::permutationTest2(statistic = prop(cont_ratings), 
+                     treatment = is_weekend)
+```
+
+Obtendo P-valor igual a 0.0002 e sendo este valor menor que 0.05, pode-se rejeitar a nossa hipótese nula e concluindo que **não é possível inferir que há uma diferença na taxa de avaliações dadas também na população de onde saiu essa amostra**.
