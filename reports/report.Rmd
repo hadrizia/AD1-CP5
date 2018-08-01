@@ -19,101 +19,126 @@ library(readr)
 library(tidyverse)
 library(lubridate)
 library(stringr)
+library(Amelia)
+library(corrplot)
 
 theme_set(theme_bw())
 ```
 
 ## Os dados
-os dados descrem 5000 encontros relâmpagos de 4 minutos envolvendo 310 jovens americanos. Os dados originais foram coletados por professores da Columbia Business School [no experimento descrito aqui](http://faculty.chicagobooth.edu/emir.kamenica/documents/genderDifferences.pdf). Os participantes tinham vários encontros de 4 minutos por noite. Após cada um, preenchiam fichas avaliando aqueles com quem se encontraram. Cada linha nos dados representa um desses encontros.
+os dados descrevem 5000 encontros relâmpagos de 4 minutos envolvendo 310 jovens americanos. Os dados originais foram coletados por professores da Columbia Business School [no experimento descrito aqui](http://faculty.chicagobooth.edu/emir.kamenica/documents/genderDifferences.pdf). Os participantes tinham vários encontros de 4 minutos por noite. Após cada um, preenchiam fichas avaliando aqueles com quem se encontraram. Cada linha nos dados representa um desses encontros.
 
-## As perguntas
-O que causa atração à primeira vista? E como isso varia para diferentes sexos? Pessoas de diferentes backgrounds? O que são as características mais e menos importantes para um homem/mulher ser percebido bem em um speed date? Que grupos são mais otimistas e pessimistas após o encontro?
-
+## A pergunta
+O que causa atração à primeira vista? Ou seja, quais são as características mais e menos importantes para um homem/mulher ser percebido bem em um speed date?
 
 ```{r warning=FALSE, message=FALSE}
-datings <- read.csv(here::here("/data/speed-dating2.csv")) %>%
-glimpse()
-```
+datings <- readr::read_csv(here::here("data/speed-dating.csv"),
+                 progress = FALSE,
+                 col_types =cols(int_corr = col_double(),
+                                 field = col_character(),
+                                 from = col_character(),
+                                 career = col_character(),
+                                 attr = col_double(),
+                                 samerace = col_character(),
+                                 sinc = col_double(),
+                                 intel = col_double(),
+                                 fun = col_double(),
+                                 amb = col_double(),
+                                 shar = col_double(),
+                                 like = col_double(),
+                                 prob = col_double(),
+                                 match_es = col_double(),
+                                 attr3_s = col_double(),
+                                 sinc3_s = col_double(),
+                                 intel3_s = col_double(),
+                                 fun3_s = col_double(),
+                                 amb3_s = col_double(),
+                                 .default = col_integer()))  %>%
+  mutate(from = as.numeric(factor(from)),
+         gender = as.numeric(factor(gender)),
+         samerace = as.numeric(factor(samerace)))
+datings <- datings %>%
+  select(iid, gender, order, pid, int_corr, samerace, age_o, age, field,
+         race, from, career, sports, tvsports, exercise, dining, museums,
+         art, hiking, gaming, clubbing, reading, tv, theater, movies, 
+         concerts, music, shopping, yoga, attr, sinc, intel, fun, amb, 
+         shar, like, prob, attr3_s, sinc3_s, intel3_s, fun3_s, amb3_s)
 
+datings %>% glimpse()
+```
 Os dados estão distribuídos nas seguintes colunas:
 
-* `userId`: Identificador do usuário;
-* `movieId`: Identificador do filme;
-* `rating`: A avaliação dada por um usuário a um filme.
-* `title`: O título do filme;
-* `genres`: Os gêneros do filme;
-* `date`: As datas;
-* `is_weekend`: Se a data é um fim de semana (Sábado ou Domingo).
+- `iid` : id do participante p1 no encontro
+- `gender` : sexo do p1, 0 = mulher
+- `order` : dos vários encontros realizados em uma noite, esse foi o n-ésimo, segundo essa variável
+- `pid` : id do participante p2
+- `int_corr` : correlação entre os interesses de p1 e p2
+- `samerace` : p1 e p2 são da mesma raça?
+- `age_o` : idade de p2
+- `age` : idade de p1
+- `field` : campo de estudo de p1
+- `race` : raça de p1. O código é Black/African American=1; European/Caucasian-American=2; Latino/Hispanic American=3; Asian/Pacific Islander/Asian-American=4;	Native American=5; 	Other=6
+- `from` : de onde p1 é
+- `career` : que carreira p1 quer seguir
+- `sports`, `tvsports`, `exercise`, `dining`, `museums`, `art`, `hiking`, `gaming`, `clubbing`, `reading`, `tv`, `theater`, `movies`, `concerts`, `music`, `shopping`, `yoga` : De 1 a 10, quão interessado p1 é em cada uma dessas atividades.  
+- `attr` : quão atraente p1 achou p2
+- `sinc` : quão sincero p1 achou p2
+- `intel` : quão inteligente p1 achou p2    
+- `fun` : quão divertido p1 achou p2
+- `amb` : quão ambicioso p1 achou p2
+- `shar` : quanto p1 achou que compartilha interesses e hobbies com p2
+- `like` : no geral, quanto p1 gostou de p2?
+- `prob` : que probabiliade p1 acha que p2 tem de querer se encontrar novamente com p- (escala 1-10)
+- `attr3_s` : quanto p1 acha que é atraente
+- `sinc3_s` : quanto p1 acha que é sincero
+- `intel3_s` : quanto p1 acha que é inteligente
+- `fun3_s` : quanto p1 acha que é divertido
+- `amb3_s` : quanto p1 acha que é ambicioso
 
 <br>
 
-#### Proporção da amostra
+#### Tratamento nos dados
 
-```{r warning=FALSE, message=FALSE}
-data <- merge(data, data %>% select(genres, is_weekend, rating, date) %>% group_by(date) %>% summarise(cont_ratings = n()),  by='date')
+Com uma pequena amostra dos dados, já percebe-se o quanto de dados faltosos exitem em algumas colunas. Essa falta pode ser melhor observada no gráfico abaixo:
+```{r}
+missmap(datings)
+```
 
-data %>%
-    ggplot() + 
-    aes(x = reorder(genres, cont_ratings, NROW),
-        fill = is_weekend) + 
-    geom_bar() + 
-    labs(
-        x = "Gêneros", 
-        y = "Quantidade de avaliações", 
-        fill = "É final de semana?"
-    )
+As variáveis que possui mais dados faltosos são as váriaveis attr3_s, sinc3_s, intel3_s, fun3_s, amb3_s. Para lidar com isso, substituirei o dado faltando pela mediana da variável.
+```{r}
+f = function(x){
+   x<-as.numeric(as.character(x)) 
+   x[is.na(x)] = median(x, na.rm=TRUE) 
+   x
+}
+
+temp <- data.frame(apply(datings,2,f)) 
+
+datings$attr3_s <- temp$attr3_s
+datings$sinc3_s <- temp$sinc3_s
+datings$intel3_s <- temp$intel3_s
+datings$fun3_s <- temp$fun3_s
+datings$amb3_s <- temp$amb3_s
 
 ```
 
-## Pergunta
-
-A pergunta é: dada essa amostra, podemos inferir que há uma diferença na taxa de avaliações dadas também *na população de onde saiu essa amostra?*
-
-### Usando Testes de hipótese e p-valores
-
-```{r warning=FALSE, message=FALSE, include=TRUE}
-# A diferença na amostra, que queremos comparar com o modelo nulo
-d = data %>% 
-    group_by(is_weekend) %>% 
-    summarise(ct = sum(cont_ratings) / n())
-m1 = d %>% filter(!is_weekend) %>% pull(ct)
-m2 = d %>% filter(is_weekend) %>% pull(ct)
-
-diferenca_amostral = m1 - m2
-
-# Permutações para calcular o que acontece no modelo nulo
-permutacoes = replicate(10000, 
-          {
-              d = data %>% 
-                  mutate(version_shuffled = sample(is_weekend, n())) %>% 
-                  group_by(version_shuffled) %>% 
-                  summarise(ct = sum(cont_ratings) / n())
-              m1 = d %>% filter(!version_shuffled) %>% pull(ct)
-              m2 = d %>% filter(version_shuffled) %>% pull(ct)
-              m1 - m2
-          })
-```
-
-#### Exibindo resultados
+Observando o resultado:
 
 ```{r}
-tibble(diferenca = permutacoes) %>% 
-  ggplot(aes(x = diferenca)) + 
-  geom_histogram(bins = 30) + 
-  geom_vline(xintercept = diferenca_amostral, size = 2, color = "orange")
+missmap(datings)
 ```
 
-#### P-valor
+Concluída a fase de processamento desses dados, agora é hora de criar um modelo.
 
-P-valor é a probabilidade de se obter uma estatística de teste igual ou mais extrema que aquela observada em uma amostra, sob a hipótese nula. Por exemplo, em testes de hipótese, pode-se rejeitar a hipótese nula a 5% caso o valor-p seja menor que 5%. Assim, uma outra interpretação para o valor-p, é que este é menor nível de significância com que se rejeitaria a hipótese nula. Em termos gerais, um valor-p pequeno significa que a probabilidade de obter um valor da estatística de teste como o observado é muito improvável, levando assim à rejeição da hipótese nula. [(Fonte)](https://pt.wikipedia.org/wiki/Valor-p)
+#### Seleção das variáveis
 
 ```{r warning=FALSE, message=FALSE}
-prop = function(x){
-    sum(x)/NROW(x)
-}
-data %>% 
-    resample::permutationTest2(statistic = prop(cont_ratings), 
-                     treatment = is_weekend)
+like.model <- lm(formula = like ~ ., datings %>% select(-field, -career), na.action = na.omit)
+summary(like.model)
 ```
 
-Obtendo P-valor igual a 0.0002 e sendo este valor menor que 0.05, pode-se rejeitar a nossa hipótese nula e concluindo que **não é possível inferir que há uma diferença na taxa de avaliações dadas também na população de onde saiu essa amostra**.
+**Quais atributos causam atração à primeira vista?**
+
+As variáveis que mais influenciam no resultado de like, segundo o modelo, são idade de p1, interesses em museus, shows, músicas e arte, compatibilidade em interesses e hobbies, quão atraente p1 achou p2 e quão atraente ele próprio se considera,  p1 acha que p2 tem de querer se encontrar novamente com ele(a), raça e se os participantes são da mesma raça. 
+As variáveis que menos influenciam o resultado de like, ainda segundo o modelo, são gênero, ordem do encontro, idade de p2, a cidade de origem, interesses em esportes, exercícios, tv, teatro, etc. e como o p1 acha que é sincero, inteligente, divertido e ambicioso.
+
